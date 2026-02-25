@@ -1,3 +1,9 @@
+# UltraRealy AAStar version
+- We fork Ultra Relay from ZeroDev, try to run a lower cost bundler until EIP-7701 is available(merge bundler, Entrypoint into Ethereum client).
+- We use Alchemy Bundler API now with a 0.01 Gwei PVG for every tx(more detail check here[Gas Report](https://github.com/AAStarCommunity/aastar-sdk/blob/main/packages/analytics/docs/OP_Mainnet_Gas_Analysis_Report.md))
+- And we run a SuperRelay, rust version bundler+paymaster, but it is so expensive for RPC, with a 27+ USD daily, so give up.
+
+
 # 🚀 Ultra Relay (Modified from Alto) 🚀
 
 ![Node Version](https://img.shields.io/badge/node-20.x-green)
