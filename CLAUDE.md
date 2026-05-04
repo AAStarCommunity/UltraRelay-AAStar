@@ -1,10 +1,20 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Mycelium Protocol 生态上下文
+
+@/Users/jason/Dev/Brood/protocol/MISSION.md
+@/Users/jason/Dev/Brood/orgs/aastar/PROFILE.md
+@/Users/jason/Dev/Brood/orgs/aastar/INTERFACES.md
 
 ## Project Overview
 
-Alto is a TypeScript implementation of the ERC-4337 bundler specification, designed for high transaction inclusion reliability. It supports multiple ERC-4337 versions (0.6, 0.7, and 0.8) and includes chain-specific optimizations.
+This repository is the **AAStar fork of Ultra Relay**, itself a ZeroDev fork of [Pimlico's Alto](https://github.com/Pimlico/alto) — a TypeScript ERC-4337 bundler supporting EntryPoint v0.6 / v0.7 / v0.8 with chain-specific optimizations.
+
+Important fork-specific behavior (do not regress these):
+- **Relayer-without-paymaster**: zeroed `maxFeePerGas` / `maxPriorityFeePerGas` in a UserOperation are accepted and the bundler sponsors gas (ZeroDev modification).
+- **AAStar additions** (see recent commits): `/wallets` HTTP endpoint that returns bundler executor addresses, RPC basic-auth on the public/wallet client transports, optional `authorizationList` on `estimateGas` when `--rpc-gas-estimate` is on, and `block-tag-support` flag controlling whether `getLogs` uses a block tag.
+
+The packaged binary is still named `alto` for compatibility — invoke via `./alto` (which runs `src/esm/cli/alto.js`).
 
 ## Key Commands
 
@@ -22,52 +32,86 @@ pnpm run dev
 # Start the bundler
 pnpm start
 
-# Run tests
+# Run tests (delegates to pnpm --filter e2e run test; e2e workspace lives at test/e2e/)
 pnpm test
+pnpm run test:ci          # CI mode (single run, no watch)
+pnpm run test:spec        # ERC-4337 bundler-spec-tests via test/spec-tests/run-spec-tests.sh
 
-# Run a specific test
-cd e2e && pnpm test -t "test name"
+# Run a single e2e test (note the directory is test/e2e, NOT e2e)
+cd test/e2e && pnpm test -t "test name"
 
-# Lint and format code
-pnpm run lint
-pnpm run format
+# Lint and format
+pnpm run lint             # biome check .
+pnpm run lint:fix         # biome check --apply
+pnpm run format           # biome format --write
+```
+
+Local stack helper: `scripts/run-local-instance.sh` boots an Anvil node, deploys EntryPoints, and starts the bundler. See `scripts/README.md`.
+
+Minimal manual run (matches README example — needs at least one EntryPoint, an executor key, a utility key, and an RPC URL):
+```bash
+./alto \
+  --entrypoints "0x5ff1...2789,0x0000...a032" \
+  --executor-private-keys "..." \
+  --utility-private-key "..." \
+  --min-balance "0" \
+  --rpc-url "http://localhost:8545" \
+  --network-name "local"
+# ./alto help  → list every flag (defined in src/cli/config/options.ts)
 ```
 
 ### Smart Contract Commands
+Foundry project lives in `contracts/` and outputs ABIs/bytecode into `src/contracts/`. Each EntryPoint version pins its own solc/EVM version, so use the specific scripts (NOT a generic `build:contracts-v06`):
 ```bash
-# Build all contract versions
-pnpm run build:contracts
-
-# Build specific version contracts
-pnpm run build:contracts-v06
-pnpm run build:contracts-v07
-pnpm run build:contracts-v08
+pnpm run build:contracts                          # build everything
+pnpm run build:contracts:PimlicoSimulations
+pnpm run build:contracts:EPFilterOpsOverride06    # solc 0.8.17 / london
+pnpm run build:contracts:EPFilterOpsOverride07    # solc 0.8.23 / paris
+pnpm run build:contracts:EPFilterOpsOverride08    # solc 0.8.28 / cancun
+pnpm run build:contracts:EPGasEstimationOverride06
+pnpm run build:contracts:EPSimulations07
+pnpm run build:contracts:EPSimulations08
 ```
+`pnpm run prepare` runs `build:contracts` then `build`, so a fresh checkout only needs `pnpm install`.
 
 ## Architecture Overview
 
 ### Core Modules
-- **`src/cli/`**: CLI entry point and option parsing
-- **`src/rpc/`**: JSON-RPC server with ERC-4337 methods (eth_sendUserOperation, etc.)
-- **`src/executor/`**: Bundle creation and submission logic, implements transaction execution strategies
-- **`src/mempool/`**: User operation pool management with validation and reputation tracking
-- **`src/store/`**: Storage abstraction layer (Redis or in-memory)
-- **`src/handlers/`**: Chain-specific gas price managers (Arbitrum, Optimism, Mantle)
-- **`src/utils/`**: Shared utilities, validation helpers, and common types
+- **`src/cli/`**: CLI entry, option parsing, dependency wiring (`alto.ts` → `handler.ts` → `setupServer.ts`); `customTransport.ts` adds the basic-auth-aware viem transport.
+- **`src/rpc/`**: Fastify JSON-RPC server (`server.ts`) and dispatcher (`rpcHandler.ts`).
+  - `methods/`: one file per RPC method (`eth_*`, `pimlico_*`, `debug_bundler_*`, `boost_sendUserOperation`); register in `methods/index.ts`.
+  - `validation/`: `SafeValidator` (ERC-4337 safe-mode, tracer-based) and `UnsafeValidator`, plus per-version `BundlerCollectorTracerV0{6,7}` and `TracerResultParserV0{6,7}`.
+  - `estimation/`: gas estimation pipelines used by `eth_estimateUserOperationGas`.
+- **`src/executor/`**: Bundle building and submission.
+  - `executorManager.ts` / `bundleManager.ts` / `executor.ts`: orchestration and submission strategy.
+  - `senderManager/`: pool of executor wallets keyed by `--executor-private-keys`.
+  - `filterOpsAndEstimateGas.ts`: pre-flight via the `EntryPointFilterOpsOverride0{6,7,8}` contracts.
+  - `utilityWalletMonitor.ts`: warns/refills the utility wallet.
+- **`src/mempool/`**: `mempool.ts` (in-memory userOp pool), `reputationManager.ts` (ERC-7562 reputation), `monitoring.ts`.
+- **`src/store/`**: Pluggable storage. `createStore.ts` picks between `createMemoryOutstandingStore` / `createRedisOutstandingStore` based on `--redis-*` flags; `createMempoolStore` and `createRedisStore` back the persistent state.
+- **`src/handlers/`**: Chain-specific gas oracles (`gasPriceManager.ts` default; `arbitrumGasPriceManager`, `optimismManager`, `mantleGasPriceManager`) plus `eventManager.ts`.
+- **`src/receiptCache/`**: Caches `eth_getTransactionReceipt` lookups.
+- **`src/types/`**: Zod schemas (`schemas.ts` is the single source of truth for RPC types), branded types, interfaces.
+- **`src/utils/`**: Shared utilities (BigInt math, viem error walking, log helpers).
+- **`contracts/`**: Foundry project producing the EntryPoint override + simulation contracts consumed by the bundler.
 
 ### Key Design Patterns
-1. **Multi-version Support**: Each ERC-4337 version has dedicated handlers in separate directories (v06, v07, v08)
-2. **Chain Abstraction**: Chain-specific logic is isolated in handlers, allowing easy addition of new chains
-3. **Storage Flexibility**: Store interface allows switching between Redis and in-memory storage
-4. **Executor Strategies**: Supports different bundle submission strategies (conditional, flashbots)
-5. **Comprehensive Validation**: Multiple validation layers including simulation, reputation, and paymaster checks
+1. **Multi-version Support**: v0.6 / v0.7 / v0.8 logic is split into per-version files (look for `*V06`, `*V07`, `*V08` suffixes) — when changing one version, audit the other two.
+2. **Chain Abstraction**: Chain-specific logic stays inside `src/handlers/`, registered via the gas price manager factory.
+3. **Storage Flexibility**: All store consumers depend on the `Store` interface; in-memory and Redis implementations must stay behaviorally identical.
+4. **Executor Strategies**: Supports different bundle submission strategies (e.g. conditional, Flashbots) selected at startup.
+5. **Comprehensive Validation**: Simulation, reputation, paymaster checks, and tracer-based opcode rule enforcement layered behind the validator interface.
 
 ### Important Files
-- `src/cli/config/bundle.ts`: CLI configuration and option definitions
-- `src/executor/executor.ts`: Main bundle execution logic
-- `src/mempool/mempool.ts`: User operation mempool implementation
-- `src/rpc/server.ts`: RPC server setup
-- `src/validator/validator.ts`: User operation validation logic
+- `src/cli/config/options.ts` — full CLI flag definitions (the source of truth; `./alto help` is generated from it).
+- `src/cli/config/bundler.ts` — bundler-mode option groups.
+- `src/cli/setupServer.ts` — wires every dependency together; start here when tracing how a flag becomes runtime behavior.
+- `src/executor/executorManager.ts` / `executor.ts` — bundle submission lifecycle.
+- `src/mempool/mempool.ts` — userOp pool semantics.
+- `src/rpc/server.ts` — Fastify server, including the `/wallets` HTTP route.
+- `src/rpc/rpcHandler.ts` — JSON-RPC dispatch.
+- `src/rpc/validation/{Safe,Unsafe}Validator.ts` — validation entry points.
+- `src/types/schemas.ts` — Zod schemas for all RPC payloads.
 
 ## Technical Stack
 - **Runtime**: Node.js 18+ with ESM modules
@@ -89,9 +133,11 @@ pnpm run build:contracts-v08
 5. The bundler requires an Ethereum node with `debug_traceCall` support
 
 ## Testing Approach
-- E2E tests are in the `e2e/` directory using Vitest
-- Test against local Anvil instances or testnets
-- Mock mode available for development without real blockchain
+- E2E tests live in `test/e2e/` (Vitest). Configured by `test/e2e/vitest.config.ts`; shared setup in `test/e2e/setup.ts` and `alto-config.json`.
+- `test/e2e/deploy-contracts/` holds the EntryPoint deployment fixtures spun up before each run.
+- Tests boot a local Anvil instance via `prool` and exercise the bundler over real JSON-RPC.
+- Bundler-spec compliance is checked separately by `pnpm run test:spec` (requires a node with `debug_traceCall`, e.g. Geth, and the bundler started with `--environment development --bundleMode manual --safeMode true`).
+- Foundry must be installed locally for both flows.
 
 ## Common Tasks
 
@@ -115,7 +161,7 @@ pnpm run build:contracts-v08
 3. Update validation logic if needed
 
 ### Working with User Operations
-- Validation logic is in `src/validator/`
+- Validation logic is in `src/rpc/validation/` (Safe vs Unsafe validators, plus per-version tracers/parsers)
 - Mempool operations are in `src/mempool/`
 - Execution logic is in `src/executor/`
 
