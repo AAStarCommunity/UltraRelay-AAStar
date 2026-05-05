@@ -193,11 +193,10 @@
 
 - **业务价值**：运营方需要快速查到 bundler 当前在用的 executor 钱包地址列表（监控余额、做 dashboard、上链查询 nonce）。从配置文件 grep 不可靠（多实例、私钥派生不同地址）。HTTP 端点是单一真相源。
 - **必要性**：运维可观测性的最小集——比 Prometheus 指标更直接，DevOps 一条 curl 就能查。
-- **流程**：`GET /wallets` → 返回 `{ wallets: ["0x...", ...], chainId: <number> }`（`src/rpc/server.ts:179-196`）。**当前实现仅返回 executor 地址列表 + chainId，不包含 utility wallet**。
+- **流程**：`GET /wallets` → 返回 `{ wallets, chainId, utilityWalletAddress, refillingWallets }`（upstream PR #17 已扩展，包含 utility 与 refilling pool）。
 - **技术方案**：
-  - 已实现：`src/rpc/server.ts:179-196` 的 `getWallets` handler
-  - **未来扩展**：如运维需要监控 utility wallet 余额，可在该端点扩展返回 `utility` 字段（M2/M3 范围）
-  - M1 验收：部署后 curl 能拿到正确地址；对比 chain explorer 上 executor 钱包发出的 tx，地址匹配
+  - 已实现：`src/rpc/server.ts` 的 `getWallets` handler（merge upstream `3f3bc2c` 后字段已齐全）
+  - M1 验收：部署后 curl 能拿到 executor / utility / refilling 三组地址；对比 chain explorer 上 executor 钱包发出的 tx，地址匹配；e2e `test/e2e/tests/wallets.test.ts` 覆盖三种字段断言 + EIP-55 checksum 校验
 
 ---
 
@@ -307,7 +306,8 @@
 
 ### Limitation 1: JSON logging fallback
 - **现象**：`--json true` 在未配置 `BETTER_STACK_TOKEN` 环境变量时，fallback 到 pino-pretty 彩色输出，并非 JSON 格式
-- **来源**：上游 ZeroDev fork 自带（`src/utils/logger.ts:100-107`）
+- **来源**：上游 ZeroDev fork 自带（`src/utils/logger.ts` 中 `initProductionLogger` 的 `if (!transport) return initDebugLogger(level)` 分支）
+- **upstream 已合的相关 fix（不解决根因）**：`520f27a fix: add error handler on logtail pino transport (#18)` + `0993646 fix: noop dead logtail transport to prevent request timeouts (#19)` — 这两个 fix 让有 token 时 logtail 异常更稳，但**未改 fallback 逻辑**，无 token 时仍 pino-pretty
 - **业务影响**：若需把日志摄入 Loki / CloudWatch / Datadog，必须配置 `BETTER_STACK_TOKEN`（即便不真用 Better Stack，也要设一个），或日志聚合系统直接解析 pino-pretty 的 stdout 文本（多数 aggregator 支持）
 - **M1 处理**：不修代码（最小化原则）。M3 配 Loki / Grafana 时若证明真有问题，再 fork branch 修并提 PR 给 zerodevapp/ultra-relay
 - **临时绕过**：在容器/服务环境变量加 `BETTER_STACK_TOKEN=dummy`（注意这会让 pino 试图连真的 Better Stack endpoint 失败，但 stdout 部分会工作。或者部署期日志走 stderr 由 sidecar 拦截）

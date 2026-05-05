@@ -5,18 +5,17 @@
 
 ---
 
-## 待提 PR
+## 待 review
 
 ### PR #1 — chore: remove debug log and clarify max-bundle-count description
-
-- **Status**: 准备中（local branch: `fix/cleanup-debug-and-cli-description`）
+- **Status**: 已提交，等待 review — **https://github.com/zerodevapp/ultra-relay/pull/27**
+- **Branch**: `AAStarCommunity:upstream-pr/cleanup-debug-and-cli-description` → `zerodevapp:ultra-relay:main`
 - **Files**:
   - `src/rpc/methods/eth_sendUserOperation.ts:225` — 删除 `console.log("=== eth_sendUserOperation called ===")`（commit 702f9af 引入的 debug 残留）
-  - `src/cli/config/options.ts:103-108` — `--max-bundle-count` description 修正为 `"Maximum number of bundles produced per getBundles iteration (NOT per-bundle op count)"`
+  - `src/cli/config/options.ts:103-108` — `--max-bundle-count` description 修正为 "Maximum number of bundles produced per getBundles iteration (NOT per-bundle op count)"
 - **Why upstream**: 两处都是 ZeroDev fork 自带，提到 ZeroDev 让所有下游 fork 受益（不只 AAStar）
-- **Target branch**: `zerodevapp/ultra-relay:main`
 - **Risk**: 极低（一行 description + 删一行 console.log）
-- **Test plan**: 现有 e2e 通过即可
+- **Local note**: AAStar fork 的 `m1/acceptance-and-planning` branch 已包含等价改动；如 PR #27 被 merge，月度 sync 时上游 patch 会覆盖本地（无操作需要）；如被拒，转入下文 "已被上游拒绝" 段维护本地 patch
 
 ---
 
@@ -37,9 +36,10 @@
 
 ### Pending — fix: JSON logging without Better Stack
 - **来源**: M1 §5.5 Known Limitation 1
-- **修改**: `src/utils/logger.ts:100-107` 的 `initProductionLogger`，无 `BETTER_STACK_TOKEN` 时也能输出 JSON 到 stdout（当前会 fallback 到 pino-pretty）
+- **修改**: `src/utils/logger.ts` 的 `initProductionLogger`，无 `BETTER_STACK_TOKEN` 时也能输出 JSON 到 stdout（当前会 fallback 到 pino-pretty）
 - **预计触发**: M3 监控成熟时（如生产用 Loki 而非 Better Stack）
 - **Why upstream**: Better Stack 不是 universal 选择，多数生产环境用 Loki / CloudWatch / Datadog，这个 fallback 让所有用户受益
+- **背景**: 上游 `520f27a` (#18) + `0993646` (#19) 已加 logtail transport 异常处理 + dead transport noop，但 fallback 逻辑未改——这条 limitation 仍适用
 
 ### Pending — fix: --json with formatter on Better Stack branch
 - **来源**: M1 §5.5 Known Limitation 1（sub-issue）

@@ -5,14 +5,19 @@ import { beforeEach, describe, expect, inject, test } from "vitest"
 import altoConfig from "../alto-config.json" with { type: "json" }
 import { beforeEachCleanUp } from "../src/utils/index.js"
 
-// Endpoint contract (src/rpc/server.ts:179-196):
-//   GET /wallets -> { wallets: Address[], chainId: number }
-// Only executor addresses are returned. The utility wallet is intentionally
-// NOT included in the response.
+// Endpoint contract (src/rpc/server.ts getWallets, post upstream PR #17):
+//   GET /wallets -> {
+//     wallets: Address[],            // executor addresses
+//     chainId: number,
+//     utilityWalletAddress: Address, // utility/sponsor wallet
+//     refillingWallets: Address[]    // refilling wallet pool
+//   }
 
 type WalletsResponse = {
     wallets: Address[]
     chainId: number
+    utilityWalletAddress: Address
+    refillingWallets: Address[]
 }
 
 const altoRpc = inject("altoRpc")
@@ -38,18 +43,27 @@ describe("GET /wallets", () => {
         await beforeEachCleanUp({ anvilRpc, altoRpc })
     })
 
-    test("returns 200 with wallets array and chainId", async () => {
+    test("returns 200 with wallets, chainId, utilityWalletAddress, refillingWallets", async () => {
         const { status, body } = await fetchWallets()
 
         expect(status).toBe(200)
         expect(body).toHaveProperty("wallets")
         expect(body).toHaveProperty("chainId")
+        expect(body).toHaveProperty("utilityWalletAddress")
+        expect(body).toHaveProperty("refillingWallets")
+
         expect(Array.isArray(body.wallets)).toBe(true)
         expect(body.wallets.length).toBeGreaterThan(0)
         for (const wallet of body.wallets) {
             expect(isAddress(wallet)).toBe(true)
         }
+
         expect(body.chainId).toBe(foundry.id)
+        expect(isAddress(body.utilityWalletAddress)).toBe(true)
+        expect(Array.isArray(body.refillingWallets)).toBe(true)
+        for (const wallet of body.refillingWallets) {
+            expect(isAddress(wallet)).toBe(true)
+        }
     })
 
     test("returned wallets match addresses derived from configured executor keys", async () => {
@@ -71,7 +85,12 @@ describe("GET /wallets", () => {
     test("each returned address is in EIP-55 checksum format", async () => {
         const { body } = await fetchWallets()
 
-        for (const wallet of body.wallets) {
+        const allAddresses = [
+            ...body.wallets,
+            body.utilityWalletAddress,
+            ...body.refillingWallets
+        ]
+        for (const wallet of allAddresses) {
             // viem.getAddress throws on non-checksummed input; for already
             // valid input it returns the canonical checksummed form, which
             // must be byte-equal to what the endpoint returned.
