@@ -21,6 +21,7 @@ import { toHex } from "viem"
 import type * as WebSocket from "ws"
 import { fromZodError } from "zod-validation-error"
 import type { AltoConfig } from "../createConfig"
+import { getAvailableWallets } from "../executor/senderManager"
 import rpcDecorators, { RpcStatus } from "../utils/fastify-rpc-decorators"
 import RpcReply from "../utils/rpc-reply"
 import type { RpcHandler } from "./rpcHandler"
@@ -181,7 +182,7 @@ export class Server {
         reply: FastifyReply
     ): Promise<void> {
         try {
-            const wallets = this.config.executorPrivateKeys.map(
+            const wallets = getAvailableWallets(this.config).map(
                 (account) => account.address
             )
             await reply.status(200).send({
