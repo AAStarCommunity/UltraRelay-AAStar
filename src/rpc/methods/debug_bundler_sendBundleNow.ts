@@ -15,10 +15,16 @@ export const debugBundlerSendBundleNowHandler = createMethodHandler({
 
         let submitted = false
         for (const bundle of bundles) {
-            const txHash =
-                await rpcHandler.executorManager.sendBundleToExecutor(bundle)
-            if (txHash) {
-                submitted = true
+            try {
+                const txHash =
+                    await rpcHandler.executorManager.sendBundleToExecutor(
+                        bundle
+                    )
+                if (txHash) {
+                    submitted = true
+                }
+            } catch {
+                // continue submitting remaining entrypoint bundles
             }
         }
 
