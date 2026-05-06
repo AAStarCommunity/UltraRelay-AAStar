@@ -135,14 +135,14 @@
   - 已实现：Pino + 自定义 serializer（BigInt → hex），见 `src/utils/`
   - M1 验收：在 OP-Sepolia 部署后，日志能被 stdout 收集、JSON 行可被 jq 解析；hex revert reason 解码工作正常（PR `fix: decode hex-encoded revert reasons`）
 
-### 2.4 `--max-bundle-count` 单 bundle op 数上限
+### 2.4 `--max-bundle-count` 每次 getBundles 迭代的每 entrypoint bundle 数上限
 
-- **业务价值**：单笔 handleOps tx 太大会触碰 block gas limit 导致整批 revert，损失全部 utility wallet gas。上限保护。
+- **业务价值**：单次 getBundles 调用凑出的 bundle 过多，会把 executor 队列打爆、延误后续 op。上限限速。
 - **必要性**：生产稳定性。
-- **流程**：bundler 在凑 bundle 时按 `maxBundleCount` 截断，剩余 op 留下次。
+- **流程**：`getBundles(maxBundleCount)` 对每个 entrypoint 分别限制 bundle 产出数；多 entrypoint 场景最多返回 `entrypoints × maxBundleCount` 个 bundle。
 - **技术方案**：
-  - 已实现：`src/cli/config/options.ts` 的 `--max-bundle-count` flag
-  - M1 验收：默认值合理（建议 5-10），灰度跑通
+  - 已实现：`src/cli/config/options.ts` 的 `--max-bundle-count` flag；`executorManager.ts` 的 `autoScalingBundling()` 已正确传入 `this.config.maxBundleCount`
+  - M1 验收：配置生效，灰度跑通
 
 ### 2.5 详细日志 + UserOp drop 原因（PR `Add detailed logging for UserOp drops`）
 
@@ -319,11 +319,11 @@
 - **我们的安全前提**：M1 §4.1 加的 HTTP rate limit + IP allowlist 是入口防线。**prod 部署时必须配 IP allowlist 只允许 AAStar 自己的 SDK 服务器/后端 IP**（详见 `docs/RUNBOOK.md`），否则任何外部 IP 都能让 bundler 垫付 gas
 - **阶段处理**：M1 / M2 不修代码（行为合理）。M3 启动 X402 收费时必须加 `--allow-implicit-boost false` flag 切换语义——届时这条限制升级为阻塞器并修复
 
-### Limitation 3: --max-bundle-count 描述误导
-- **现象**：CLI flag 描述说 "Maximum number of UserOperations to include in a bundle"，实际行为是限制单次 `getBundles()` 循环产出的 bundle 数量（**非单 bundle 内 op 数**）
-- **来源**：上游 ZeroDev fork（`src/cli/config/options.ts:103-108`，实际行为 `src/mempool/mempool.ts:725-773`）
-- **业务影响**：运维按字面理解配置可能与预期不符
-- **处理**：通过 `fix/cleanup-debug-and-cli-description` 分支改 CLI description（一行），同步给 zerodevapp/ultra-relay 提 PR（详见 `docs/UPSTREAM_PR_QUEUE.md`）
+### Limitation 3: --max-bundle-count 描述误导（已修复）
+- **原现象**：CLI flag 描述说 "Maximum number of UserOperations to include in a bundle"，实际行为是**每 entrypoint** 限制单次 `getBundles()` 产出的 bundle 数
+- **来源**：上游 ZeroDev fork（`src/cli/config/options.ts`，实际行为 `src/mempool/mempool.ts` `getBundles()`/`process()` 方法）
+- **已修复**：description 已更新为"Maximum bundles per entrypoint per getBundles iteration"；`executorManager.ts` `autoScalingBundling()` 已传入 `maxBundleCount`；多 entrypoint 场景总 bundle 数 = entrypoints × maxBundleCount（per-entrypoint 语义，非全局上限）
+- **上游 PR**：cleanup 部分已提 zerodevapp/ultra-relay PR #27（见 `docs/UPSTREAM_PR_QUEUE.md`）
 
 ### Limitation 4: --block-tag-support 范围
 （同 §3.1 已加说明，此处只引用）该 flag 仅影响 `getLogs` 调用；其他 RPC 调用仍硬编码 `blockTag: "latest"`。
