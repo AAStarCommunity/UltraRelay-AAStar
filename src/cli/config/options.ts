@@ -101,8 +101,8 @@ export const bundlerOptions: CliCommandOptions<IBundlerArgsInput> = {
         default: "20000000"
     },
     "max-bundle-count": {
-        // Cap is enforced in src/mempool/mempool.ts:725-773 (getBundles loop):
-        // it limits how many bundles `getBundles()` returns per iteration,
+        // Cap is enforced in the getBundles() loop in src/mempool/mempool.ts:
+        // it limits how many bundles getBundles() returns per iteration,
         // not how many UserOperations end up inside a single bundle.
         description:
             "Maximum number of bundles produced per getBundles iteration (caps loop output, not per-bundle UserOp count)",
