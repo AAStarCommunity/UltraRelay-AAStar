@@ -10,14 +10,14 @@ import { beforeEachCleanUp } from "../src/utils/index.js"
 //     wallets: Address[],            // executor addresses
 //     chainId: number,
 //     utilityWalletAddress: Address, // utility/sponsor wallet
-//     refillingWallets: Address[]    // refilling wallet pool
+//     refillingWallets: boolean      // whether this instance refills wallets
 //   }
 
 type WalletsResponse = {
     wallets: Address[]
     chainId: number
     utilityWalletAddress: Address
-    refillingWallets: Address[]
+    refillingWallets: boolean
 }
 
 const altoRpc = inject("altoRpc")
@@ -60,10 +60,7 @@ describe("GET /wallets", () => {
 
         expect(body.chainId).toBe(foundry.id)
         expect(isAddress(body.utilityWalletAddress)).toBe(true)
-        expect(Array.isArray(body.refillingWallets)).toBe(true)
-        for (const wallet of body.refillingWallets) {
-            expect(isAddress(wallet)).toBe(true)
-        }
+        expect(typeof body.refillingWallets).toBe("boolean")
     })
 
     test("returned wallets match addresses derived from configured executor keys", async () => {
@@ -87,8 +84,7 @@ describe("GET /wallets", () => {
 
         const allAddresses = [
             ...body.wallets,
-            body.utilityWalletAddress,
-            ...body.refillingWallets
+            body.utilityWalletAddress
         ]
         for (const wallet of allAddresses) {
             // viem.getAddress throws on non-checksummed input; for already
