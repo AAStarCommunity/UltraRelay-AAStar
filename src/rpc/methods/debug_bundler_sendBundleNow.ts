@@ -8,16 +8,27 @@ export const debugBundlerSendBundleNowHandler = createMethodHandler({
         rpcHandler.ensureDebugEndpointsAreEnabled("debug_bundler_sendBundleNow")
 
         const bundles = await rpcHandler.mempool.getBundles(1)
-        const bundle = bundles[0]
 
-        if (bundles.length === 0 || bundle.userOps.length === 0) {
+        if (bundles.length === 0 || bundles[0].userOps.length === 0) {
             throw new Error("no userOps in mempool")
         }
 
-        const txHash =
-            await rpcHandler.executorManager.sendBundleToExecutor(bundle)
+        let submitted = false
+        for (const bundle of bundles) {
+            try {
+                const txHash =
+                    await rpcHandler.executorManager.sendBundleToExecutor(
+                        bundle
+                    )
+                if (txHash) {
+                    submitted = true
+                }
+            } catch {
+                // continue submitting remaining entrypoint bundles
+            }
+        }
 
-        if (!txHash) {
+        if (!submitted) {
             throw new Error("no tx hash")
         }
 

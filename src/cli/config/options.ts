@@ -101,8 +101,11 @@ export const bundlerOptions: CliCommandOptions<IBundlerArgsInput> = {
         default: "20000000"
     },
     "max-bundle-count": {
+        // Cap is enforced per-entrypoint in the getBundles() loop in
+        // src/mempool/mempool.ts. With N entrypoints and maxBundleCount=M,
+        // up to N*M bundles may be returned per getBundles() call.
         description:
-            "Maximum number of UserOperations to include in a bundle. If not set, no limit is applied.",
+            "Maximum bundles per entrypoint per getBundles iteration (not per-bundle UserOp count; total bundles = entrypoints × this value)",
         type: "number",
         require: false
     },
